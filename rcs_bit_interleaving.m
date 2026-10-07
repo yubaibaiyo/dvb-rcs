@@ -16,7 +16,12 @@ mask4 = [5 8 10 2 6 4 7 1 3 9 11 0];
 mask5 = [10 0 9 1 11 7 3 5 8 6 2 4];
 mask6 = [9 7 2 4 10 8 3 6 11 1 5 0];
 %不同N值对应参数，如果没有指定，报error
-[s, p, N1, K1, K2, K3] = get_interleaver_params(N);
+[s, p, N1, K1, K2, K3, perm_tab] = get_interleaver_params(N);
+if ~isempty(perm_tab)
+    interleaved = data(perm_tab(:) + 1);
+    interleaved = interleaved(:);
+    return;
+end
 
 
 K4 = N-K1-K2-K3;
@@ -106,7 +111,7 @@ end
 interleaved = data(perm_final+1);
 interleaved = interleaved(:);
 end
-function [s, p, N1, K1, K2, K3] = get_interleaver_params(N)
+function [s, p, N1, K1, K2, K3, perm_tab] = get_interleaver_params(N)
 table = [
 336, 28, 67, 168, 84, 84, 84; 
 468, 15, 229, 252, 144, 132, 120; 
@@ -126,10 +131,12 @@ table = [
 
 idx = find(table(:,1) == N, 1);
 
+perm_tab = [];
 if(isempty(idx))
-
-    [~,idx] = min(abs(table(:,1)-N));%取最接近的值
-    warning('N不在Table 7-15中');
+    % N not in table 7-15 (it only covers 14 values): use the annex B permutation table
+    perm_tab = rcs_annexB_perm(N);      % errors for an unknown N
+    s = 0; p = 0; N1 = 0; K1 = 0; K2 = 0; K3 = 0;
+    return;
 end
 
 row =  table(idx,:);
