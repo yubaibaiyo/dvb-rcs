@@ -49,10 +49,11 @@ end
 
 intermediate2 = zeros(1,N);
 for i = 0:N-1
-    src_idx = mod(s+p*intermediate1(i+1),N);
-    intermediate2(i+1) = intermediate1(src_idx + 1);
+    % step 3+4: pi3(i) = pi2(pi1(i)) with pi2(i) = mod(s + i*p, N)
+    intermediate2(i+1) = mod(s + p*intermediate1(i+1), N);
 end
 
+intermediate3 = zeros(1,N);
 n_sub3 = floor(K1/12);
 for j = 1:n_sub3
     base = (j-1)*12;
@@ -99,7 +100,7 @@ end
 
 perm_final = zeros(1,N);
 for i = 0:N-1
-    perm_final(i+1) = intermediate3(intermediate2(i+1) + 1);
+    perm_final(i+1) = intermediate2(intermediate3(i+1) + 1);
 end
 
 interleaved = data(perm_final+1);

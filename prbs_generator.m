@@ -14,7 +14,7 @@ seq = zeros(len, 1);
 
 taps = poly(2:end);
 
-has_output_feedback = any(taps == 0)
+has_output_feedback = any(taps == 0);
 
 taps = taps(taps > 0);
 

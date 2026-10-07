@@ -1,24 +1,4 @@
 function params = get_rcs_params(burst_type, coding_scheme, waveform_cfg)
-%GET_RCS_PARAMS 汇总 DVB-RCS2（EN 301 545-2 V1.3.1）返回链路仿真参数
-% 码率、调制方式/映射等全部直接取自内置参考波形表（RCS_WAVEFORM_TABLE）中
-% waveform_id 对应的那一行，不读取外部文件，也不对参数做推断/适配。
-%
-% 输入
-%   burst_type     'TRF' | 'ACQ' | 'SYNC' | 'CSC'
-%   coding_scheme  'concatenated'(CC-CPM，表 A-3) | 'turbo'(TC-LM，表 A-1)
-%   waveform_cfg   可选结构体：waveform_id（默认 1）；并可用同名字段覆盖
-%                  preamble_len postamble_len pilot_period pilot_block_len
-%                  pilot_sum payload_symbols uw_hex
-%
-% 输出（节选）
-%   waveform_id code_rate code_rate_num code_rate_den code_rate_str   ——直接查表
-%   mod_order mod_name                                               ——直接查表（A-1）
-%   conv_params: g1 g2 K mother_rate(=1/2) target_rate；conv_tail_bits
-%   cpm_*: M L mh ph cpm_mod_index_h alpha_rc data1_len data2_len term_symbols
-%   突发构造参数：preamble_len postamble_len pilot_period pilot_block_len
-%                 pilot_sum payload_symbols burst_symbol_length uw_hex
-%
-% See also RCS_WAVEFORM_TABLE, RCS_CONV_ENCODE, RCS_TURBO_ENCODE, CHECK_PARAMS_TABLE.
 
 if nargin < 3 || isempty(waveform_cfg)
     waveform_cfg = struct();
@@ -83,10 +63,12 @@ if strcmp(params.mod_type, 'cpm')
     params.pilot_sum           = 0;
     params.payload_symbols     = (w.data1_bits + w.data2_bits) / log2(w.M);
     params.burst_symbol_length = w.burst_symbols;
+    params.payload_bytes       = [];             % 表 A-3 给的是比特数，无字节列
 else
     params.mod_order           = w.mod_order;    % 直接查表
     params.mod_name            = w.mapping;
     params.mapping             = w.mapping;
+    params.payload_bytes       = w.payload_bytes;% 表 A-1 的净荷字节数（= 原始数据长度/8）
     params.preamble_len        = w.preamble_len;
     params.postamble_len       = w.postamble_len;
     params.pilot_period        = w.pilot_period;
@@ -107,7 +89,7 @@ for i = 1:numel(ovr)
     end
 end
 
-%% ---------------- CRC 类型（§7.3.4）----------------
+%% ---------------- CRC 类型----------------
 switch params.burst_type
     case 'TRF'
         params.crc_type = 'crc32';
@@ -115,7 +97,24 @@ switch params.burst_type
         params.crc_type = 'crc16';
 end
 
-%% ---------------- 卷积码（CC-CPM，§7.3.5.2）----------------
+%% ---------------- 编码器输入长度（由参考波形表的净荷长度反推）----------------
+% 突发不带任何头部：编码器输入 = 原始数据 + CRC
+%   A-1（TC-LM）给的是净荷字节数  -> fec_input_bits = payload_bytes*8
+%   A-3（CC-CPM）直接给比特数      -> fec_input_bits = 表中的 fec_input_bits
+if strcmp(params.mod_type, 'cpm')
+    params.fec_input_bits = w.fec_input_bits;
+else
+    params.fec_input_bits = w.payload_bytes * 8;
+end
+switch params.crc_type
+    case 'crc32'
+        params.crc_bits = 32;
+    otherwise
+        params.crc_bits = 16;
+end
+params.input_len = params.fec_input_bits - params.crc_bits;
+
+%% ---------------- 卷积码（CC-CPM，7.3.5.2）----------------
 % 母码率固定 1/2；K∈{3,4} 与生成多项式 (5,7)o / (15,17)o 一一绑定（查表）
 params.conv_mother_rate = 1/2;
 params.conv_K    = 3;
@@ -136,7 +135,7 @@ params.conv_params.K           = params.conv_K;
 params.conv_params.mother_rate = 1/2;
 params.conv_params.target_rate = params.code_rate_str;   % 直接来自参考波形表
 
-%% ---------------- Turbo（TC-LM，§7.3.5.1）----------------
+%% ---------------- Turbo（TC-LM，7.3.5.1）----------------
 params.turbo_K        = 5;              % 4 级寄存器
 params.turbo_n_states = 16;
 params.turbo_polys    = {23 35 27};     % 反馈 23o、Y 35o、W 27o
@@ -144,6 +143,19 @@ params.turbo_params.poly        = params.turbo_polys;
 params.turbo_params.n_states    = params.turbo_n_states;
 params.turbo_params.target_rate = params.code_rate_str;  % 直接来自参考波形表
 params.turbo_params.N_inner     = [];
+%% ---------------- TC-LM turbo 交织/打孔参数（表 A-1 行内列，§7.3.5.1.1 / §7.3.5.1.3）----------------
+if strcmp(params.mod_type, 'linear')
+    params.turbo_params.N         = w.payload_bytes * 4;   % couple 数 N = 净荷比特/2
+    params.turbo_params.P         = w.P;
+    params.turbo_params.Q0        = w.Q0;
+    params.turbo_params.Q1        = w.Q1;
+    params.turbo_params.Q2        = w.Q2;
+    params.turbo_params.Q3        = w.Q3;
+    params.turbo_params.y_period  = w.y_period;
+    params.turbo_params.y_pattern = w.y_pattern;
+    params.turbo_params.w_period  = w.w_period;
+    params.turbo_params.w_pattern = w.w_pattern;
+end
 
 %% ---------------- MODCOD 组合校验（§7.3.7.1.4）----------------
 if ~isempty(params.mod_order) && params.mod_order == 3 && params.code_rate < 2/3
